@@ -276,3 +276,4 @@ output_matrix_low()
 for i in range(1,100):
   (x,y) = print_polygon(x,y)
   (x,y) = find_nearby_poligon(x,y)
+
