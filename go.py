@@ -4,6 +4,7 @@ import sys
 import numpy as np
 from pprint import pprint
 from time import sleep
+import re
 
 mmsize = 25.4 # from inc to mm
 laser_resolution = 0.07 # in mm
@@ -20,6 +21,8 @@ G4 S3
 end_gcode = """
 M106 P0 S255
 """
+
+#open('out.gcode', 'w').close()
 
 matrix_low_setpoint_threshold = 0.95 # used in get_matrix_low_dot for determine is dot set or not
 
@@ -120,10 +123,10 @@ def find_nearby_poligon(x_cur,y_cur):
       for k in range(i*-1, i+1):
         x_pos = x_cur + j
         y_pos = y_cur + k
-        if x_pos > steps_x:
-          x_pos = steps_x-1
-        if y_pos > steps_y:
-          y_pos = steps_y-1
+        if x_pos > steps_x-2:
+          x_pos = steps_x-2
+        if y_pos > steps_y-2:
+          y_pos = steps_y-2
         if x_pos < 0:
           x_pos = 0
         if y_pos < 0:
@@ -135,7 +138,7 @@ def find_nearby_poligon(x_cur,y_cur):
               x_result = x_pos
               y_result = y_pos
         except Exception:
-          awd=1
+          fsehif=1
     if (x_result != x_cur) or (y_result != y_cur):
 	    return x_result, y_result
           #print x_pos,y_pos,"-----"
@@ -172,6 +175,7 @@ def print_gcode():
   print end_gcode
 
 def print_polygon(x,y):
+  f = open('out.gcode', 'a+')
   dir_cur = 'd'
   dir_cur2 = 'd'
   dir_exist = 1
@@ -239,26 +243,39 @@ def print_polygon(x,y):
 
     if dir_cur == 'd':
       (y,x) = (y-1,x)
-      #print x,y
-      print "G1 X" + str(x) + " Y" + str(y)
+      f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
     if dir_cur == 'r':
       (y,x) = (y,x+1)
-      #print x,y
-      print "G1 X" + str(x) + " Y" + str(y)
-      #simple gcode
+      f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
     if dir_cur == 'u':
       (y,x) = (y+1,x)
-      #print x,y
-      print "G1 X" + str(x) + " Y" + str(y)
-      #simple gcode
+      f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
     if dir_cur == 'l':
       (y,x) = (y,x-1)
-      #print x,y
-      print "G1 X" + str(x) + " Y" + str(y)
-      #simple gcode
-    #sleep(0.1)
+      f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
     if dir_exist == 0:
+      f.close()
       return x,y
+
+def reduce_code():
+  with open('out.gcode') as f:
+    content = f.readlines()
+  content = [x.strip() for x in content]
+  for i in range(0,len(content)-1):
+    reg = re.search('X(\d+)\sY(\d+)', content[i])
+    (x1,y1) = (reg.group(1), reg.group(2))
+    reg = re.search('X(\d+)\sY(\d+)', content[i+1])
+    (x2,y2) = (reg.group(1), reg.group(2))
+    reg = re.search('X(\d+)\sY(\d+)', content[i+2])
+    (x3,y3) = (reg.group(1), reg.group(2))
+    
+    if x1 == x2 == x3 and y1 == y2 + 1 == y3 + 2:
+    if x1 == x2 == x3 and y1 == y2 - 1 == y3 - 2:
+    if y1 == y2 == y3 and x1 == x2 + 1 == x3 + 2:
+    if y1 == y2 == y3 and x1 == x2 - 1 == x3 - 2:    
+
+reduce_code()
+exit(0)  
 
 steps_x = int(round(img_len_x/step_dot_pos_float(1))) # number lines in matrix with laser_resolution X
 steps_y = int(round(img_len_y/step_dot_pos_float(1))) # number lines in matrix with laser_resolution Y
