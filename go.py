@@ -12,18 +12,21 @@ laser_power = 250 # 0 - min, 255 - max
 laser_burn_speed = 400 # speed laser maybe good
 laser_move_speed = 400 # travel speed
 gcode_filename = 'out.gcode'
+y_height = 12 # height of laser focus
 
 start_gcode = """
-G21 ; Set units to metric
-G90 ; Absolute coordinates
-G1 X0 Y0
+;G21 ; Set units to metric
+;G90 ; Absolute coordinates
+G1 X0 Y0 Z""" + str(y_height) + """
+;G4 S3
+M106 P0 S250
 G4 S3
 """
 end_gcode = """
 M106 P0 S255
 """
 
-#open(gcode_filename, 'w').close()
+open(gcode_filename, 'w').close()
 
 matrix_low_setpoint_threshold = 0.95 # used in get_matrix_low_dot for determine is dot set or not
 
@@ -51,9 +54,12 @@ def get_matrix_low_dot(step_x,step_y):
   points_sum = 0
   points_total = 0
   for x in range( step_dot_pos(step_x), step_dot_pos(step_x+1) ):
-		for y in range( step_dot_pos(step_y), step_dot_pos(step_y+1) ):
-			points_sum += matrix[y][x]
-			points_total += 1
+    for y in range( step_dot_pos(step_y), step_dot_pos(step_y+1) ):
+      try:
+        points_sum += matrix[y][x]
+      except Exception:
+        pass
+      points_total += 1
   if points_sum*1.0/points_total > matrix_low_setpoint_threshold :
 		return 1
   else:
@@ -98,7 +104,10 @@ def fill_matrix_low():
   #global stemps_x
   for x in range(0, steps_x-1):
     for y in range(0, steps_y-1):
-      matrix_low[x][y] = get_matrix_low_dot(y,x)
+      try:
+        matrix_low[x][y] = get_matrix_low_dot(y,x)
+      except Exception:
+        pass
 
 def output_matrix():
   f = open('matrix.txt', 'w')
@@ -139,7 +148,7 @@ def find_nearby_poligon(x_cur,y_cur):
               x_result = x_pos
               y_result = y_pos
         except Exception:
-          fsehif=1
+          pass
     if (x_result != x_cur) or (y_result != y_cur):
 	    return x_result, y_result
           #print x_pos,y_pos,"-----"
@@ -175,9 +184,8 @@ def print_gcode():
         pos_prev = pos
   print end_gcode
 
-def print_polygon(x,y):
+def get_polygon(x,y):
   matrix_transit = []
-  #f = open(gcode_filename, 'a+')
   dir_cur = 'd'
   dir_cur2 = 'd'
   dir_exist = 1
@@ -270,7 +278,7 @@ def print_polygon(x,y):
 def reduce_gcode(content):
   arr_result = []
 
-  while(len(content) > 0):
+  while(len(content) > 2):
 
     arr_temp = []
     arr_temp.append(content[0])
@@ -280,7 +288,7 @@ def reduce_gcode(content):
         continue
       else:
         break
-    if len(arr_temp) > 2:
+    if len(arr_temp) > 1:
       for i in range(0, len(arr_temp)):
         del content[0]
       arr_result.append(arr_temp[0])
@@ -289,12 +297,12 @@ def reduce_gcode(content):
     arr_temp = []
     arr_temp.append(content[0])
     for i in range(1, len(content)-1):
-      if content[i][0] == content[i-1][0] and content[i][1] == content[i-1][1] + 1:
+      if content[i][0] == content[i-1][0] and content[i][1] == content[i-1][1] + 1: #x == xprev and y == yprev + 1
         arr_temp.append( [ content[i][0], content[i][1] ] )
         continue
       else:
         break
-    if len(arr_temp) > 2:
+    if len(arr_temp) > 1:
       for i in range(0, len(arr_temp)):
         del content[0]
       arr_result.append(arr_temp[0])
@@ -308,7 +316,7 @@ def reduce_gcode(content):
         continue
       else:
         break
-    if len(arr_temp) > 2:
+    if len(arr_temp) > 1:
       for i in range(0, len(arr_temp)):
         del content[0]
       arr_result.append(arr_temp[0])
@@ -317,68 +325,50 @@ def reduce_gcode(content):
     arr_temp = []
     arr_temp.append(content[0])
     for i in range(1, len(content)-1):
-      if content[i][0] == content[i-1][0] and content[i][1] == content[i-1][1] - 1:
+      if content[i][0] == content[i-1][0] and content[i][1] == content[i-1][1] - 1: #x == xprev and y == yprev - 1
         arr_temp.append( [ content[i][0], content[i][1] ] )
         continue
       else:
         break
-    if len(arr_temp) > 2:
+    if len(arr_temp) > 1:
       for i in range(0, len(arr_temp)):
         del content[0]
       arr_result.append(arr_temp[0])
       arr_result.append(arr_temp[len(arr_temp)-1]) 
+   
+    if (len(content) == 1):
+      arr_result.append(content[0])
+      del content[0]
+    if (len(content) == 2):
+      arr_result.append(content[0])
+      arr_result.append(content[1])
+      del content[0]
+      del content[0]
 
-    print content[0], content[1]
+  return arr_result
 
-  print arr_result
 
-def reduce_code():
-  len_recycled_content = 0
-  len_prerecycled_content = 1
-  start_pos = 0
-  with open(gcode_filename) as f:
-    content = f.readlines()
-  content = [x.strip() for x in content]
+def matrix_reverse_h(matrix):
+  matrix_new = [[0 for x in range(steps_x)] for y in range(steps_y)]
+  for i in range(0, len(matrix)-1 ):
+    for j in range(0, len(matrix[0])-1 ):
+      matrix_new[i][j] = matrix[i][len(matrix[i]) - 1 - j]
+  return matrix_new
 
-  prog = re.compile('X(\d+)\sY(\d+)')
-  
-  while( len_prerecycled_content != len_recycled_content):
-    len_prerecycled_content = len(content)
-    for i in range(start_pos, len(content)-1):
-      try:
-        reg = prog.search(content[i])
-        (x1,y1) = ( int(reg.group(1)), int(reg.group(2)) )
-        reg = prog.search(content[i+1])
-        (x2,y2) = ( int(reg.group(1)), int(reg.group(2)) )
-        reg = prog.search(content[i+2])
-        (x3,y3) = ( int(reg.group(1)), int(reg.group(2)) )
-        
-        if x1 == x2 == x3 and y1 == y2 + 1 == y3 + 2:
-          del content[i]
-          start_pos = i-2
-          break
-        if x1 == x2 == x3 and y1 == y2 - 1 == y3 - 2:
-          del content[i]
-          start_pos = i-2
-          break
-        if y1 == y2 == y3 and x1 == x2 + 1 == x3 + 2:
-          del content[i]
-          start_pos = i-2
-          break
-        if y1 == y2 == y3 and x1 == x2 - 1 == x3 - 2:
-          del content[i]
-          start_pos = i-2
-          break
-      except Exception:
-        fesf=1
-    len_recycled_content = len(content)
-  f = open(gcode_filename, 'w')
-  for string in content:
-    f.write(string + "\n")
+def print_polygon(polygon):
+  f = open(gcode_filename, 'a+')
+  f.write("M106 P0 S255\n")
+  try:
+   f.write( "G1 " + "X" + str(polygon[0][0]*laser_resolution) + " Y" + str(polygon[0][1]*laser_resolution) + " F" + str(laser_burn_speed) + "\n" )
+   del polygon[0]
+  except Exception:
+    pass
+  f.write("M106 P0 S0\n")
+  for dot in polygon:
+    f.write( "G1 " + "X" + str(dot[0]*laser_resolution) + " Y" + str(dot[1]*laser_resolution) + " F" + str(laser_burn_speed) + "\n" )
+  f.write("M106 P0 S255\n")
   f.close()
 
-#reduce_gcode()
-#exit(0)  
 
 steps_x = int(round(img_len_x/step_dot_pos_float(1))) # number lines in matrix with laser_resolution X
 steps_y = int(round(img_len_y/step_dot_pos_float(1))) # number lines in matrix with laser_resolution Y
@@ -388,13 +378,26 @@ matrix_low = [[0 for x in range(steps_x)] for y in range(steps_y)] # matrix for 
 tomatrix()
 fill_matrix_low()
 
-#print_gcode()
+
+f = open(gcode_filename, 'a+')
+f.write(start_gcode)
+f.close()
+
+matrix_low = matrix_reverse_h(matrix_low)
+
 output_matrix()
 output_matrix_low()
 
+#pprint(matrix_low)
+
 (x,y) = find_nearby_poligon(0,0)
-for i in range(1,100):
-  (x,y,matrix_polygon_full) = print_polygon(x,y)
+print "--",x, y
+for i in range(1,300):
+  (x,y,matrix_polygon_full) = get_polygon(x,y)
   matrix_plygon_reduced = reduce_gcode(matrix_polygon_full)
+  print_polygon(matrix_plygon_reduced)
   (x,y) = find_nearby_poligon(x,y)
 
+f = open(gcode_filename, 'a+')
+f.write(end_gcode)
+f.close()
