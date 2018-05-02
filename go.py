@@ -363,7 +363,7 @@ def print_polygon(polygon):
    del polygon[0]
   except Exception:
     pass
-  f.write("M106 P0 S" + laser_power + "\n")
+  f.write("M106 P0 S" + str(laser_power) + "\n")
   for dot in polygon:
     f.write( "G1 " + "X" + str(dot[0]*laser_resolution) + " Y" + str(dot[1]*laser_resolution) + " F" + str(laser_burn_speed) + "\n" )
   f.write("M106 P0 S255\n")
