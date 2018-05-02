@@ -11,6 +11,7 @@ laser_resolution = 0.07 # in mm
 laser_power = 250 # 0 - min, 255 - max
 laser_burn_speed = 400 # speed laser maybe good
 laser_move_speed = 400 # travel speed
+gcode_filename = 'out.gcode'
 
 start_gcode = """
 G21 ; Set units to metric
@@ -22,7 +23,7 @@ end_gcode = """
 M106 P0 S255
 """
 
-#open('out.gcode', 'w').close()
+#open(gcode_filename, 'w').close()
 
 matrix_low_setpoint_threshold = 0.95 # used in get_matrix_low_dot for determine is dot set or not
 
@@ -175,7 +176,8 @@ def print_gcode():
   print end_gcode
 
 def print_polygon(x,y):
-  f = open('out.gcode', 'a+')
+  matrix_transit = []
+  #f = open(gcode_filename, 'a+')
   dir_cur = 'd'
   dir_cur2 = 'd'
   dir_exist = 1
@@ -243,39 +245,140 @@ def print_polygon(x,y):
 
     if dir_cur == 'd':
       (y,x) = (y-1,x)
-      f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
+      arr_temp = [x,y]
+      matrix_transit.append(arr_temp)
+      #f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
     if dir_cur == 'r':
       (y,x) = (y,x+1)
-      f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
+      arr_temp = [x,y]
+      matrix_transit.append(arr_temp)
+      #f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
     if dir_cur == 'u':
       (y,x) = (y+1,x)
-      f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
+      arr_temp = [x,y]
+      matrix_transit.append(arr_temp)
+      #f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
     if dir_cur == 'l':
       (y,x) = (y,x-1)
-      f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
+      arr_temp = [x,y]
+      matrix_transit.append(arr_temp)
+      #f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
     if dir_exist == 0:
-      f.close()
-      return x,y
+      #f.close()
+      return x,y,matrix_transit
+
+def reduce_gcode(content):
+  arr_result = []
+
+  while(len(content) > 0):
+
+    arr_temp = []
+    arr_temp.append(content[0])
+    for i in range(1, len(content)-1):
+      if content[i][0] == content[i-1][0] + 1 and content[i][1] == content[i-1][1]: # x == xprev + 1 and y == yprev
+        arr_temp.append( [ content[i][0], content[i][1] ] )
+        continue
+      else:
+        break
+    if len(arr_temp) > 2:
+      for i in range(0, len(arr_temp)):
+        del content[0]
+      arr_result.append(arr_temp[0])
+      arr_result.append(arr_temp[len(arr_temp)-1])
+
+    arr_temp = []
+    arr_temp.append(content[0])
+    for i in range(1, len(content)-1):
+      if content[i][0] == content[i-1][0] and content[i][1] == content[i-1][1] + 1:
+        arr_temp.append( [ content[i][0], content[i][1] ] )
+        continue
+      else:
+        break
+    if len(arr_temp) > 2:
+      for i in range(0, len(arr_temp)):
+        del content[0]
+      arr_result.append(arr_temp[0])
+      arr_result.append(arr_temp[len(arr_temp)-1]) 
+
+    arr_temp = []
+    arr_temp.append(content[0])
+    for i in range(1, len(content)-1):
+      if content[i][0] == content[i-1][0] - 1 and content[i][1] == content[i-1][1]: # x == xprev + 1 and y == yprev
+        arr_temp.append( [ content[i][0], content[i][1] ] )
+        continue
+      else:
+        break
+    if len(arr_temp) > 2:
+      for i in range(0, len(arr_temp)):
+        del content[0]
+      arr_result.append(arr_temp[0])
+      arr_result.append(arr_temp[len(arr_temp)-1])
+
+    arr_temp = []
+    arr_temp.append(content[0])
+    for i in range(1, len(content)-1):
+      if content[i][0] == content[i-1][0] and content[i][1] == content[i-1][1] - 1:
+        arr_temp.append( [ content[i][0], content[i][1] ] )
+        continue
+      else:
+        break
+    if len(arr_temp) > 2:
+      for i in range(0, len(arr_temp)):
+        del content[0]
+      arr_result.append(arr_temp[0])
+      arr_result.append(arr_temp[len(arr_temp)-1]) 
+
+    print content[0], content[1]
+
+  print arr_result
 
 def reduce_code():
-  with open('out.gcode') as f:
+  len_recycled_content = 0
+  len_prerecycled_content = 1
+  start_pos = 0
+  with open(gcode_filename) as f:
     content = f.readlines()
   content = [x.strip() for x in content]
-  for i in range(0,len(content)-1):
-    reg = re.search('X(\d+)\sY(\d+)', content[i])
-    (x1,y1) = (reg.group(1), reg.group(2))
-    reg = re.search('X(\d+)\sY(\d+)', content[i+1])
-    (x2,y2) = (reg.group(1), reg.group(2))
-    reg = re.search('X(\d+)\sY(\d+)', content[i+2])
-    (x3,y3) = (reg.group(1), reg.group(2))
-    
-    if x1 == x2 == x3 and y1 == y2 + 1 == y3 + 2:
-    if x1 == x2 == x3 and y1 == y2 - 1 == y3 - 2:
-    if y1 == y2 == y3 and x1 == x2 + 1 == x3 + 2:
-    if y1 == y2 == y3 and x1 == x2 - 1 == x3 - 2:    
 
-reduce_code()
-exit(0)  
+  prog = re.compile('X(\d+)\sY(\d+)')
+  
+  while( len_prerecycled_content != len_recycled_content):
+    len_prerecycled_content = len(content)
+    for i in range(start_pos, len(content)-1):
+      try:
+        reg = prog.search(content[i])
+        (x1,y1) = ( int(reg.group(1)), int(reg.group(2)) )
+        reg = prog.search(content[i+1])
+        (x2,y2) = ( int(reg.group(1)), int(reg.group(2)) )
+        reg = prog.search(content[i+2])
+        (x3,y3) = ( int(reg.group(1)), int(reg.group(2)) )
+        
+        if x1 == x2 == x3 and y1 == y2 + 1 == y3 + 2:
+          del content[i]
+          start_pos = i-2
+          break
+        if x1 == x2 == x3 and y1 == y2 - 1 == y3 - 2:
+          del content[i]
+          start_pos = i-2
+          break
+        if y1 == y2 == y3 and x1 == x2 + 1 == x3 + 2:
+          del content[i]
+          start_pos = i-2
+          break
+        if y1 == y2 == y3 and x1 == x2 - 1 == x3 - 2:
+          del content[i]
+          start_pos = i-2
+          break
+      except Exception:
+        fesf=1
+    len_recycled_content = len(content)
+  f = open(gcode_filename, 'w')
+  for string in content:
+    f.write(string + "\n")
+  f.close()
+
+#reduce_gcode()
+#exit(0)  
 
 steps_x = int(round(img_len_x/step_dot_pos_float(1))) # number lines in matrix with laser_resolution X
 steps_y = int(round(img_len_y/step_dot_pos_float(1))) # number lines in matrix with laser_resolution Y
@@ -291,6 +394,7 @@ output_matrix_low()
 
 (x,y) = find_nearby_poligon(0,0)
 for i in range(1,100):
-  (x,y) = print_polygon(x,y)
+  (x,y,matrix_polygon_full) = print_polygon(x,y)
+  matrix_plygon_reduced = reduce_gcode(matrix_polygon_full)
   (x,y) = find_nearby_poligon(x,y)
 
