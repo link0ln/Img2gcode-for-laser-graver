@@ -8,7 +8,7 @@ import re
 
 mmsize = 25.4 # from inc to mm
 laser_resolution = 0.07 # in mm
-laser_power = 250 # 0 - min, 255 - max
+laser_power = 130 # 0 - min, 255 - max
 laser_burn_speed = 400 # speed laser maybe good
 laser_move_speed = 400 # travel speed
 gcode_filename = 'out.gcode'
@@ -167,7 +167,7 @@ def print_gcode():
             print "M106 P0 S" + str(laser_power)
             print "G1 X" + str(x*laser_resolution) + " Y" + str(y*laser_resolution) + " F" + str(laser_burn_speed)
           else:
-            print "M106 P0 S0"
+            print "M106 P0 S" + laser_power
             print "G1 X" + str(x*laser_resolution) + " Y" + str(y*laser_resolution) + " F" + str(laser_move_speed)
         pos_prev = pos
     else:
@@ -179,7 +179,7 @@ def print_gcode():
             print "M106 P0 S" + str(laser_power)
             print "G1 X" + str(x*laser_resolution) + " Y" + str(y*laser_resolution) + " F" + str(laser_burn_speed)
           else:
-            print "M106 P0 S0"
+            print "M106 P0 S" + laser_power
             print "G1 X" + str(x*laser_resolution) + " Y" + str(y*laser_resolution) + " F" + str(laser_move_speed)
         pos_prev = pos
   print end_gcode
@@ -363,7 +363,7 @@ def print_polygon(polygon):
    del polygon[0]
   except Exception:
     pass
-  f.write("M106 P0 S0\n")
+  f.write("M106 P0 S" + laser_power + "\n")
   for dot in polygon:
     f.write( "G1 " + "X" + str(dot[0]*laser_resolution) + " Y" + str(dot[1]*laser_resolution) + " F" + str(laser_burn_speed) + "\n" )
   f.write("M106 P0 S255\n")
@@ -391,7 +391,6 @@ output_matrix_low()
 #pprint(matrix_low)
 
 (x,y) = find_nearby_poligon(0,0)
-print "--",x, y
 for i in range(1,300):
   (x,y,matrix_polygon_full) = get_polygon(x,y)
   matrix_plygon_reduced = reduce_gcode(matrix_polygon_full)
