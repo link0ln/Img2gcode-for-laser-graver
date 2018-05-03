@@ -8,11 +8,11 @@ import re
 
 mmsize = 25.4 # from inc to mm
 laser_resolution = 0.07 # in mm
-laser_power = 130 # 0 - min, 255 - max
-laser_burn_speed = 400 # speed laser maybe good
-laser_move_speed = 400 # travel speed
+laser_power = 220 # 0 - min, 255 - max
+laser_burn_speed = 1200 # speed laser maybe good
+laser_move_speed = 1200 # travel speed
 gcode_filename = 'out.gcode'
-y_height = 12 # height of laser focus
+y_height = 10 # height of laser focus
 
 start_gcode = """
 ;G21 ; Set units to metric
