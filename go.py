@@ -1,402 +1,175 @@
-#!/usr/bin/env python
-from PIL import Image
+#!/usr/bin/env python3
+
+import argparse
+import logging
 import sys
+import os
+
 import numpy as np
-from pprint import pprint
-from time import sleep
-import re
+from PIL import Image
 
-mmsize = 25.4 # from inc to mm
-laser_resolution = 0.07 # in mm
-laser_power = 220 # 0 - min, 255 - max
-laser_burn_speed = 1200 # speed laser maybe good
-laser_move_speed = 1200 # travel speed
-gcode_filename = 'out.gcode'
-y_height = 10 # height of laser focus
+import cv2
 
-start_gcode = """
-;G21 ; Set units to metric
-;G90 ; Absolute coordinates
-G1 X0 Y0 Z""" + str(y_height) + """
-;G4 S3
-M106 P0 S250
-G4 S3
-"""
-end_gcode = """
-M106 P0 S255
-"""
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+)
 
-open(gcode_filename, 'w').close()
+def parse_args():
+    parser = argparse.ArgumentParser(description="Image to G-code for laser engraver (offset/spiral fill).")
+    parser.add_argument("image", help="Path to the input image file")
+    parser.add_argument("--laser_resolution", type=float, default=0.07, help="Laser spot size in mm (default: 0.07)")
+    parser.add_argument("--laser_power", type=int, default=255, help="Laser power (0=max, 255=min, default: 255)")
+    parser.add_argument("--work_speed", type=int, default=1200, help="Working speed, F for engraving (default: 1200)")
+    parser.add_argument("--travel_speed", type=int, default=3000, help="Travel speed, F for moves without laser (default: 3000)")
+    parser.add_argument("--focus_height", type=float, default=5.0, help="Focus height in mm (default: 5.0)")
+    parser.add_argument("--default_dpi", type=int, default=300, help="Default DPI if not found in image (default: 300)")
+    return parser.parse_args()
 
-matrix_low_setpoint_threshold = 0.95 # used in get_matrix_low_dot for determine is dot set or not
-
-img = Image.open("roads.bmp")
-
-img_len_x = len(np.array(img)[0])
-img_len_y = len(np.array(img))
-
-matrix = [[0 for x in range(img_len_x)] for y in range(img_len_y)] # create matrix with image resolution
-
-img_dpi = img.info.get('dpi')[0]
-img_res_x = img_len_x*1.0/img_dpi*mmsize # img size in mm X
-img_res_y = img_len_y*1.0/img_dpi*mmsize # img size in mm Y
-dpi_mm = img_dpi*1.0/mmsize # dpi in mm
-dots_in_sector = dpi_mm * laser_resolution # laser dot size in image resolution
-
-arr = list(img.getdata())
-
-def step_dot_pos(size):
-  return int(round(size*dots_in_sector))
-def step_dot_pos_float(size):
-  return float(size*dots_in_sector)
-
-def get_matrix_low_dot(step_x,step_y):
-  points_sum = 0
-  points_total = 0
-  for x in range( step_dot_pos(step_x), step_dot_pos(step_x+1) ):
-    for y in range( step_dot_pos(step_y), step_dot_pos(step_y+1) ):
-      try:
-        points_sum += matrix[y][x]
-      except Exception:
-        pass
-      points_total += 1
-  if points_sum*1.0/points_total > matrix_low_setpoint_threshold :
-		return 1
-  else:
-    return 0
-
-def tomatrix(): # convert image array to matrix with img_len_x and img_len_y params
-  i = 0
-  j = 0
-  for elem in arr:
-    if i == img_len_x:
-      j += 1
-      i = 0
-    if (elem == 255):
-      matrix[j][i] = 0
-    if (elem == 0):
-      matrix[j][i] = 1
-    i += 1
-
-def show_matrix(): # show main matrix
-  result = ''
-  for row in matrix:
-    for elem in row:
-      if elem == 0:
-        result += ' '
-      if elem == 1:
-        result += 'O'
-    result += '\n'
-  return result
-
-def show_matrix_low(): # show low matrix 
-  result = ''
-  for row in matrix_low:
-    for elem in row:
-      if elem == 0:
-        result += ' '
-      if elem == 1:
-        result += 'O'
-    result += '\n'
-  return result
-
-def fill_matrix_low():
-  #global stemps_x
-  for x in range(0, steps_x-1):
-    for y in range(0, steps_y-1):
-      try:
-        matrix_low[x][y] = get_matrix_low_dot(y,x)
-      except Exception:
-        pass
-
-def output_matrix():
-  f = open('matrix.txt', 'w')
-  f.write(show_matrix())
-  f.close()
-
-def output_matrix_low():
-  f = open('matrix_low.txt', 'w')
-  f.write(show_matrix_low())
-  f.close()
-  
-def find_nearby_poligon(x_cur,y_cur):
-  max_pos = steps_y
-  x_pos = x_cur
-  y_pos = y_cur
-  x_result = x_cur
-  y_result = y_cur
-  module = 10000000 # big number ))
-  if steps_x > steps_y:
-    max_pos = steps_x
-  for i in range(1, max_pos):
-    for j in range(i*-1, i+1):
-      for k in range(i*-1, i+1):
-        x_pos = x_cur + j
-        y_pos = y_cur + k
-        if x_pos > steps_x-2:
-          x_pos = steps_x-2
-        if y_pos > steps_y-2:
-          y_pos = steps_y-2
-        if x_pos < 0:
-          x_pos = 0
-        if y_pos < 0:
-          y_pos = 0
-        try:
-          if (matrix_low[x_pos][y_pos] == 1) and ( j != 0 ) and ( k != 0 ):
-            if (abs(j) + abs(k)) < module:
-              module = abs(j) + abs(k)
-              x_result = x_pos
-              y_result = y_pos
-        except Exception:
-          pass
-    if (x_result != x_cur) or (y_result != y_cur):
-	    return x_result, y_result
-          #print x_pos,y_pos,"-----"
-  exit(0)
-	  
-def print_gcode():
-  pos_prev = 0
-  print start_gcode
-  for y in range(0, steps_y):
-    if y % 2 == 1 :
-      for x in range(0, steps_x):
-        pos = matrix_low[y][x]
-        if pos != pos_prev:
-          x_cur = x
-          if (pos == 1) :
-            print "M106 P0 S" + str(laser_power)
-            print "G1 X" + str(x*laser_resolution) + " Y" + str(y*laser_resolution) + " F" + str(laser_burn_speed)
-          else:
-            print "M106 P0 S" + laser_power
-            print "G1 X" + str(x*laser_resolution) + " Y" + str(y*laser_resolution) + " F" + str(laser_move_speed)
-        pos_prev = pos
+def get_image_dpi(img, default_dpi):
+    info = img.info
+    dpi = None
+    if "dpi" in info:
+        dpi = info["dpi"][0]
+    elif "resolution" in info:  # for some PNGs
+        dpi = int(info["resolution"])
     else:
-      for x in range(steps_x-1, 0, -1):
-        pos = matrix_low[y][x]
-        if pos != pos_prev:
-          x_cur = x
-          if (pos == 1) :
-            print "M106 P0 S" + str(laser_power)
-            print "G1 X" + str(x*laser_resolution) + " Y" + str(y*laser_resolution) + " F" + str(laser_burn_speed)
-          else:
-            print "M106 P0 S" + laser_power
-            print "G1 X" + str(x*laser_resolution) + " Y" + str(y*laser_resolution) + " F" + str(laser_move_speed)
-        pos_prev = pos
-  print end_gcode
+        dpi = default_dpi
+    logging.info(f"Using DPI: {dpi}")
+    return dpi
 
-def get_polygon(x,y):
-  matrix_transit = []
-  dir_cur = 'd'
-  dir_cur2 = 'd'
-  dir_exist = 1
-  while (dir_exist > 0):
-    dir_exist = 0
+def image_to_binary_mask(img, white_threshold=240):
+    logging.info("Converting image to binary mask...")
+    img = img.convert("RGBA")
+    arr = np.array(img)
+    alpha = arr[:, :, 3]
+    mask = (
+        ((arr[:, :, 0] <= white_threshold) |
+         (arr[:, :, 1] <= white_threshold) |
+         (arr[:, :, 2] <= white_threshold)) &
+        (alpha > 0)
+    )
+    mask = mask.astype(np.uint8)
+    logging.info(f"Binary mask generated. Engraving area pixels: {np.sum(mask)}")
+    return mask
 
-    if dir_cur2 == 'd': 
-      if matrix_low[x][y-1] == 1: 
-        dir_cur = 'd'
-        dir_exist += 1
-      elif matrix_low[x+1][y] == 1: 
-        dir_cur = 'r'
-        dir_exist += 1
-      elif matrix_low[x][y+1] == 1: 
-        dir_cur = 'u'
-        dir_exist += 1
-      elif matrix_low[x-1][y] == 1: 
-        dir_cur = 'l'
-        dir_exist += 1
-    
-    if dir_cur2 == 'r':
-      if matrix_low[x+1][y] == 1:
-        dir_cur = 'r'
-        dir_exist += 1
-      elif matrix_low[x][y+1] == 1:
-        dir_cur = 'u'
-        dir_exist += 1
-      elif matrix_low[x-1][y] == 1:
-        dir_cur = 'l'
-        dir_exist += 1
-      elif matrix_low[x][y-1] == 1:
-        dir_cur = 'd'
-        dir_exist += 1
+def mask_to_offset_contours(mask, laser_width_px):
+    """
+    Делает offset fill (спиральная заливка) бинарной маски.
+    mask - бинарная маска (uint8, 0 или 1)
+    laser_width_px - ширина лазера в пикселях (>=1)
+    Возвращает список контуров, где каждый — последовательность (x, y) точек
+    """
+    logging.info(f"Offset fill: laser width = {laser_width_px} px")
+    contours_list = []
+    cur_mask = (mask * 255).astype(np.uint8)
+    kernel = np.ones((laser_width_px, laser_width_px), np.uint8)
+    iteration = 0
 
-    if dir_cur2 == 'u':
-      if matrix_low[x][y+1] == 1:
-        dir_cur = 'u'
-        dir_exist += 1
-      elif matrix_low[x-1][y] == 1:
-        dir_cur = 'l'
-        dir_exist += 1
-      elif matrix_low[x][y-1] == 1:
-        dir_cur = 'd'
-        dir_exist += 1
-      elif matrix_low[x+1][y] == 1:
-        dir_cur = 'r'
-        dir_exist += 1
+    while np.any(cur_mask):
+        # Ищем только внешние контуры (RETR_EXTERNAL)
+        contours, _ = cv2.findContours(cur_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        if not contours:
+            break
+        for cnt in contours:
+            # cnt: (N,1,2) -> нужно преобразовать в [(x, y), ...]
+            path = [(int(pt[0][0]), int(pt[0][1])) for pt in cnt]
+            if len(path) > 2:
+                contours_list.append(path)
+        cur_mask = cv2.erode(cur_mask, kernel, iterations=1)
+        iteration += 1
+    logging.info(f"Total offset contours: {len(contours_list)}")
+    return contours_list
 
-    if dir_cur2 == 'l':
-      if matrix_low[x-1][y] == 1:
-        dir_cur = 'l'
-        dir_exist += 1
-      elif matrix_low[x][y-1] == 1:
-        dir_cur = 'd'
-        dir_exist += 1
-      elif matrix_low[x+1][y] == 1:
-        dir_cur = 'r'
-        dir_exist += 1
-      elif matrix_low[x][y+1] == 1:
-        dir_cur = 'u'
-        dir_exist += 1
+def pixel_to_mm(x, y, img_w, img_h, physical_w, physical_h, center_origin=True):
+    """Преобразует координаты пикселя в мм с центровкой"""
+    if center_origin:
+        x_mm = (x - img_w / 2) * (physical_w / img_w)
+        y_mm = (y - img_h / 2) * (physical_h / img_h)
+    else:
+        x_mm = x * (physical_w / img_w)
+        y_mm = y * (physical_h / img_h)
+    return x_mm, y_mm
 
-    dir_cur2 = dir_cur
-    matrix_low[x][y] = 0
+def generate_gcode(
+    contours, img_w, img_h, physical_w, physical_h, 
+    laser_resolution, laser_power, work_speed, travel_speed, focus_height, center_origin, filename
+):
+    logging.info("Generating G-code (offset/spiral fill)...")
+    gcode = []
 
-    if dir_cur == 'd':
-      (y,x) = (y-1,x)
-      arr_temp = [x,y]
-      matrix_transit.append(arr_temp)
-      #f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
-    if dir_cur == 'r':
-      (y,x) = (y,x+1)
-      arr_temp = [x,y]
-      matrix_transit.append(arr_temp)
-      #f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
-    if dir_cur == 'u':
-      (y,x) = (y+1,x)
-      arr_temp = [x,y]
-      matrix_transit.append(arr_temp)
-      #f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
-    if dir_cur == 'l':
-      (y,x) = (y,x-1)
-      arr_temp = [x,y]
-      matrix_transit.append(arr_temp)
-      #f.write("G1 X" + str(x) + " Y" + str(y) + "\n")
-    if dir_exist == 0:
-      #f.close()
-      return x,y,matrix_transit
+    gcode.append(f"; Generated by image2gcode (offset fill)")
+    gcode.append(f"G21 ; set units to mm")
+    gcode.append(f"G90 ; absolute positioning")
+    gcode.append(f"G1 Z{focus_height:.3f} F{travel_speed} ; move laser head to focus height")
+    gcode.append(f"M106 P0 S255 ; laser OFF")
+    gcode.append("G4 S3 ; wait 3 seconds before start")
 
-def reduce_gcode(content):
-  arr_result = []
+    last_position = None
+    contour_num = 0
 
-  while(len(content) > 2):
+    for path in contours:
+        contour_num += 1
+        if not path:
+            continue
+        start_x, start_y = path[0]
+        start_x_mm, start_y_mm = pixel_to_mm(
+            start_x, start_y, img_w, img_h, physical_w, physical_h, center_origin=center_origin)
+        # Если мы не в начале, то делаем холостой ход к старту нового контура
+        if last_position is None or (abs(last_position[0]-start_x_mm) > 1e-4 or abs(last_position[1]-start_y_mm) > 1e-4):
+            gcode.append(f"M106 P0 S255 ; laser OFF")
+            gcode.append(
+                f"G1 X{start_x_mm:.3f} Y{start_y_mm:.3f} F{travel_speed} ; travel to start of contour #{contour_num}")
 
-    arr_temp = []
-    arr_temp.append(content[0])
-    for i in range(1, len(content)-1):
-      if content[i][0] == content[i-1][0] + 1 and content[i][1] == content[i-1][1]: # x == xprev + 1 and y == yprev
-        arr_temp.append( [ content[i][0], content[i][1] ] )
-        continue
-      else:
-        break
-    if len(arr_temp) > 1:
-      for i in range(0, len(arr_temp)):
-        del content[0]
-      arr_result.append(arr_temp[0])
-      arr_result.append(arr_temp[len(arr_temp)-1])
+        gcode.append(f"M106 P0 S{laser_power} ; laser ON")
+        # Движение вдоль контура
+        for px, py in path:
+            x_mm, y_mm = pixel_to_mm(
+                px, py, img_w, img_h, physical_w, physical_h, center_origin=center_origin)
+            gcode.append(
+                f"G1 X{x_mm:.3f} Y{y_mm:.3f} F{work_speed} ; contour #{contour_num}")
+        gcode.append(f"M106 P0 S255 ; laser OFF")
+        last_position = (x_mm, y_mm)
 
-    arr_temp = []
-    arr_temp.append(content[0])
-    for i in range(1, len(content)-1):
-      if content[i][0] == content[i-1][0] and content[i][1] == content[i-1][1] + 1: #x == xprev and y == yprev + 1
-        arr_temp.append( [ content[i][0], content[i][1] ] )
-        continue
-      else:
-        break
-    if len(arr_temp) > 1:
-      for i in range(0, len(arr_temp)):
-        del content[0]
-      arr_result.append(arr_temp[0])
-      arr_result.append(arr_temp[len(arr_temp)-1]) 
+    gcode.append("M106 P0 S255 ; laser OFF (final)")
+    logging.info("G-code generation finished.")
+    # Сохраняем
+    with open(filename, "w") as f:
+        for line in gcode:
+            f.write(line + "\n")
+    logging.info(f"G-code saved to {filename}")
 
-    arr_temp = []
-    arr_temp.append(content[0])
-    for i in range(1, len(content)-1):
-      if content[i][0] == content[i-1][0] - 1 and content[i][1] == content[i-1][1]: # x == xprev + 1 and y == yprev
-        arr_temp.append( [ content[i][0], content[i][1] ] )
-        continue
-      else:
-        break
-    if len(arr_temp) > 1:
-      for i in range(0, len(arr_temp)):
-        del content[0]
-      arr_result.append(arr_temp[0])
-      arr_result.append(arr_temp[len(arr_temp)-1])
+def main():
+    args = parse_args()
+    image_path = args.image
+    output_gcode = image_path + ".gcode"
 
-    arr_temp = []
-    arr_temp.append(content[0])
-    for i in range(1, len(content)-1):
-      if content[i][0] == content[i-1][0] and content[i][1] == content[i-1][1] - 1: #x == xprev and y == yprev - 1
-        arr_temp.append( [ content[i][0], content[i][1] ] )
-        continue
-      else:
-        break
-    if len(arr_temp) > 1:
-      for i in range(0, len(arr_temp)):
-        del content[0]
-      arr_result.append(arr_temp[0])
-      arr_result.append(arr_temp[len(arr_temp)-1]) 
-   
-    if (len(content) == 1):
-      arr_result.append(content[0])
-      del content[0]
-    if (len(content) == 2):
-      arr_result.append(content[0])
-      arr_result.append(content[1])
-      del content[0]
-      del content[0]
+    # 1. Загрузка изображения
+    logging.info(f"Opening image: {image_path}")
+    img = Image.open(image_path)
+    dpi = get_image_dpi(img, args.default_dpi)
+    img_w, img_h = img.size
+    physical_w = img_w / dpi * 25.4
+    physical_h = img_h / dpi * 25.4
+    logging.info(f"Image size: {img_w}x{img_h} px, physical size: {physical_w:.2f}x{physical_h:.2f} mm")
 
-  return arr_result
+    # 2. Бинаризация
+    mask = image_to_binary_mask(img, white_threshold=240)
 
+    # 3. Ширина лазера в пикселях
+    laser_width_px = max(1, int(np.ceil(args.laser_resolution / (25.4 / dpi))))
+    logging.info(f"Laser width: {args.laser_resolution} mm = {laser_width_px} px at {dpi} DPI")
 
-def matrix_reverse_h(matrix):
-  matrix_new = [[0 for x in range(steps_x)] for y in range(steps_y)]
-  for i in range(0, len(matrix)-1 ):
-    for j in range(0, len(matrix[0])-1 ):
-      matrix_new[i][j] = matrix[i][len(matrix[i]) - 1 - j]
-  return matrix_new
+    # 4. Offset fill по всей области (маске)
+    contours = mask_to_offset_contours(mask, laser_width_px)
 
-def print_polygon(polygon):
-  f = open(gcode_filename, 'a+')
-  f.write("M106 P0 S255\n")
-  try:
-   f.write( "G1 " + "X" + str(polygon[0][0]*laser_resolution) + " Y" + str(polygon[0][1]*laser_resolution) + " F" + str(laser_burn_speed) + "\n" )
-   del polygon[0]
-  except Exception:
-    pass
-  f.write("M106 P0 S" + str(laser_power) + "\n")
-  for dot in polygon:
-    f.write( "G1 " + "X" + str(dot[0]*laser_resolution) + " Y" + str(dot[1]*laser_resolution) + " F" + str(laser_burn_speed) + "\n" )
-  f.write("M106 P0 S255\n")
-  f.close()
+    # 5. Генерация G-code
+    generate_gcode(
+        contours, img_w, img_h, physical_w, physical_h,
+        args.laser_resolution, args.laser_power, args.work_speed, args.travel_speed,
+        args.focus_height, True, output_gcode
+    )
 
-
-steps_x = int(round(img_len_x/step_dot_pos_float(1))) # number lines in matrix with laser_resolution X
-steps_y = int(round(img_len_y/step_dot_pos_float(1))) # number lines in matrix with laser_resolution Y
-
-matrix_low = [[0 for x in range(steps_x)] for y in range(steps_y)] # matrix for laser with laser_resolution
-
-tomatrix()
-fill_matrix_low()
-
-
-f = open(gcode_filename, 'a+')
-f.write(start_gcode)
-f.close()
-
-matrix_low = matrix_reverse_h(matrix_low)
-
-output_matrix()
-output_matrix_low()
-
-#pprint(matrix_low)
-
-(x,y) = find_nearby_poligon(0,0)
-for i in range(1,300):
-  (x,y,matrix_polygon_full) = get_polygon(x,y)
-  matrix_plygon_reduced = reduce_gcode(matrix_polygon_full)
-  print_polygon(matrix_plygon_reduced)
-  (x,y) = find_nearby_poligon(x,y)
-
-f = open(gcode_filename, 'a+')
-f.write(end_gcode)
-f.close()
+if __name__ == "__main__":
+    main()
